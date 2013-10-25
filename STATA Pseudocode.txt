@@ -1,0 +1,93 @@
+variables brought forward from cb data:
+	$psat_score_math_max
+	$psat_score_reading_max
+	$psat_score_writing_max
+	$st_education_father
+	$st_education_mother
+	$hs_id
+	$urban_rural_2006
+	$st_race
+	$cohort_yyyy
+
+variables brought forward from civis' R code: # high school rollups
+	$poor
+	$minority
+	$edu
+	$sat
+
+for each student:
+
+	define $composite_psat as $psat_score_math_max + $psat_score_reading_max + $psat_score_writing_max
+	define $fathers_eduction as empty if $st_education_father is "No Response"
+				 as 0     if $st_education_father is "Grade School"
+				 as 1     if $st_education_father is "Some High School"
+				 as 2     if $st_education_father is "High school diploma or equivalent"
+				 as 3     if $st_education_father is "Some College"
+				 as 4     if $st_education_father is "Associate or two-year Degree"
+				 as 5     if $st_education_father is "Business or Trade school"
+				 as 6     if $st_education_father is "Bachelors or four-year degree"
+				 as 7     if $st_education_father is "Some graduate or professional school"
+				 as 8     if $st_education_father is "Graduate or professional degree"
+	define $mothers_eduction as empty if $st_education_mother is "No Response"
+				 as 0     if $st_education_mother is "Grade School"
+				 as 1     if $st_education_mother is "Some High School"
+				 as 2     if $st_education_mother is "High school diploma or equivalent"
+				 as 3     if $st_education_mother is "Some College"
+				 as 4     if $st_education_mother is "Associate or two-year Degree"
+				 as 5     if $st_education_mother is "Business or Trade school"
+				 as 6     if $st_education_mother is "Bachelors or four-year degree"
+				 as 7     if $st_education_mother is "Some graduate or professional school"
+				 as 8     if $st_education_mother is "Graduate or professional degree"
+	define $parents_max_ed as max($fathers_eduation, $mothers_education)
+	# Here civis reassociates text labels with the values of $fathers_eduation, $mothers_education and $parents_max_ed.
+	# This does not anywhere appear to be used.
+	define $mean_parental_ed 	as mean($parents_max_ed)_across_$hs_id
+	define $hs_parents_ed_binary    as 1 if $mean_parental_ed > 4.5
+					as 0 if $mean_parental_ed <= 4.5
+	define $rural_dummy		as 1 if $urban_rural_2006 >= 4
+					as 0 if $urban_rural_2006 < 4  or is empty
+	
+	#$col_demo is an estimate of the student's expected mean college 2-section SAT score, accounting for student environment
+	define $col_demo as 489.82
+	       $col_demo += 2.59 * $composite_psat
+	       $col_demo += 29.88 if $hs_parents_ed_binary is 1 (i.e. if mean hs parental max edu > 4.5)
+               if $rural_dummy is 0 (i.e. if $urban_rural_2006 is < 4 or is missing) # urban or unknown students
+		       $col_demo -=  0.0  if $st_race = "asian"
+		       $col_demo -= 31.5  if $st_race = "black"
+		       $col_demo -= 34.35 if $st_race = "hispanic"
+		       $col_demo -= 29.96 if $st_race = "native"
+		       $col_demo -= 21.25 if $st_race = "other"
+		       $col_demo -= 35.85 if $st_race = "refused"
+		       $col_demo -= 26.12 if $st_race = "white"
+	       if $rural_dummy is 1 (i.e. if $urban_rural_2006 >= 4) # rural students
+		       $col_demo -=  2.49 if $st_race = "asian"
+		       $col_demo -= 38.93 if $st_race = "black"
+		       $col_demo -= 27.42 if $st_race = "hispanic"
+		       $col_demo -= 15.13 if $st_race = "native"
+		       $col_demo -= 24.32 if $st_race = "other"
+		       $col_demo -= 30.07 if $st_race = "refused"
+		       $col_demo -= 34.54 if $st_race = "white"
+
+ 	#	Surprising sign
+        #                |
+        #                |
+	#                v
+	       $col_demo += 45.42 * $poor # smoothed and corrected percent of SDQ answerers at student's hs who reported family incomes < $50K
+	       $col_demo -= 20.87 * $minority # smoothed and corrected percent of PSAT testers at student's hs reported as non-white, non-asian
+	       $col_demo += 32.46 * $edu # average of a smoothed and corrected percent of SDQ answerers at student's hs reporting mother's education as at least a four-year degree with a similar variable for father's education
+	       $col_demo -= 20.87 * $sat # smoothed and corrected average 2-section SAT score from 2011 takers at student's hs
+	#$col_nodemo is an estimate of the expected mean college 2-section SAT score of a third baser with a given PSAT score
+	define $col_nodemo as 603.04
+	       $col_demo += 3.27 * $composite_psat
+	define $opportunity_gap as $col_nodemo - $col_demo
+	if $cohort_yyyy is 2011
+		define $op_gap10_2011 as 1  if $opportunity_gap <= (first decile of $opportunity_gap)
+				      as 2  if (first decile of $opportunity_gap) < $opportunity_gap <= (second decile of $opportunity_gap)
+				      as 3  if (first decile of $opportunity_gap) < $opportunity_gap <= (third  decile of $opportunity_gap)
+				      as 4  if (third decile of $opportunity_gap) < $opportunity_gap <= (fourth decile of $opportunity_gap)
+				      as 5  if (fourth decile of $opportunity_gap) < $opportunity_gap <= (fifth decile of $opportunity_gap)
+				      as 6  if (fifth decile of $opportunity_gap) < $opportunity_gap <= (sixth decile of $opportunity_gap)
+				      as 7  if (sixth decile of $opportunity_gap) < $opportunity_gap <= (seventh decile of $opportunity_gap)
+				      as 8  if (seventh decile of $opportunity_gap) < $opportunity_gap <= (eigth decile of $opportunity_gap)
+				      as 9  if (eigth decile of $opportunity_gap) < $opportunity_gap <= (ninth decile of $opportunity_gap)
+			      	      as 10 if (ninth decile of $opportunity_gap) < $opportunity_gap

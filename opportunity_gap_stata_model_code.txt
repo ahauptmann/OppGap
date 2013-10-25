@@ -1,0 +1,72 @@
+/* STATA DO FILE CODE */
+
+gen composite_psat = psat_score_math_max + psat_score_reading_max + psat_score_writing_max
+
+//standardize education for father//
+gen fathers_education = .
+replace fathers_education = . if st_education_father == "No Response"
+replace fathers_education = 0 if st_education_father == "Grade School"
+replace fathers_education = 1 if st_education_father == "Some High School"
+replace fathers_education = 2 if st_education_father == "High school diploma or equivalent"
+replace fathers_education = 3 if st_education_father == "Some College"
+replace fathers_education = 4 if st_education_father == "Associate or two-year Degree"
+replace fathers_education = 5 if st_education_father == "Business or Trade school"
+replace fathers_education = 6 if st_education_father == "Bachelors or four-year degree"
+replace fathers_education = 7 if st_education_father == "Some graduate or professional school"
+replace fathers_education = 8 if st_education_father == "Graduate or professional degree"
+
+//standardize education for mother//
+gen mothers_education = .
+replace mothers_education = . if st_education_mother == "No Response"
+replace mothers_education = 0 if st_education_mother == "Grade School"
+replace mothers_education = 1 if st_education_mother == "Some High School"
+replace mothers_education = 2 if st_education_mother == "High school diploma or equivalent"
+replace mothers_education = 3 if st_education_mother == "Some College"
+replace mothers_education = 4 if st_education_mother == "Associate or two-year Degree"
+replace mothers_education = 5 if st_education_mother == "Business or Trade school"
+replace mothers_education = 6 if st_education_mother == "Bachelors or four-year degree"
+replace mothers_education = 7 if st_education_mother == "Some graduate or professional school"
+replace mothers_education = 8 if st_education_mother == "Graduate or professional degree"
+
+//gen max education for parents//
+gen parents_max_ed = max(mothers_education, fathers_education)
+
+//generate value labels for parental education variables//
+label define Education 0 "Grade School" 1 "Some High School" 2 "High School Grad" 3 "Some College" 4 "Two Year Degree" 5 "Trade School" 6 "College Grad" 7 "Some Grad School" 8 "Graduate Degree"
+
+//append value label to income variable//
+label values fathers_education mothers_education parents_max_ed Education
+
+bysort hs_id: egen mean_parental_ed=mean(parents_max_ed)
+gen hs_parents_ed_binary = (mean_parental_ed >4.5)
+
+gen rural_dummy = 1 if urban_rural_2006 >=4 & urban_rural_2006 !=.
+replace rural_dummy = 0 if rural_dummy ==. 
+
+gen col_demo = 489.82
+replace col_demo = col_demo + 2.59 * composite_psat 
+replace col_demo = col_demo + 29.88 * hs_parents_ed_binary
+replace col_demo = col_demo - 31.5 if st_race == "black"
+replace col_demo = col_demo - 34.35 if st_race == "hispanic"
+replace col_demo = col_demo - 29.96 if st_race == "native"
+replace col_demo = col_demo - 21.25 if st_race == "other"
+replace col_demo = col_demo - 35.85 if st_race == "refused"
+replace col_demo = col_demo - 26.12 if st_race == "white"
+replace col_demo = col_demo - 2.49 * rural_dummy
+replace col_demo = col_demo - 7.43 * rural_dummy if st_race == "black"
+replace col_demo = col_demo + 6.93 * rural_dummy if st_race == "hispanic"
+replace col_demo = col_demo + 14.83 * rural_dummy if st_race == "native"
+replace col_demo = col_demo - 3.07 * rural_dummy if st_race == "other" 
+replace col_demo = col_demo + 5.78 * rural_dummy if st_race == "refused"
+replace col_demo = col_demo - 8.42 * rural_dummy if st_race == "white"
+replace col_demo = col_demo + 45.42 * poor /* high school rollup variable created in R */
+replace col_demo = col_demo - 20.87 * minority /* high school rollup variable created in R */
+replace col_demo = col_demo + 32.46 * edu /* high school rollup variable created in R */
+replace col_demo = col_demo + .17 * sat /* high school rollup variable created in R */
+
+gen col_nodemo = 603.04
+replace col_nodemo = col_nodemo + 3.27 * composite_psat
+
+gen opportunity_gap = col_nodemo - col_demo
+
+xtile op_gap10_2011 = opportunity_gap if cohort_yyyy==2011, nquantiles(10)

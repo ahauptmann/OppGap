@@ -1,0 +1,237 @@
+\documentclass{article}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+Civis looks at 2011 cohort data in 28 states.
+
+% Alaska  Arizona       Califonia   Connecticut Delaware    DC            Florida
+% Georgia Hawaii        Indiana     Maine       Maryland    Massachusetts Mississippi
+% Nevada  New Hampshire New Jersey  New York    N Carolina  Oregon        Pennsylvania
+% Rhode I S Carolina    Texas       Vermont     Virginia    Washington    W Virginia
+
+The R code rolls up measures of environment at schools known to the college board.  These schools must have an ai_name and have fewer than 2000 SAT takers in the 2011 cohort.  The variables aggregated are:
+
+\begin{itemize}
+  \item $n$, the count of SAT takers, saved after merge as $sat\_n$
+  \item $sat$, the average 2-sections SAT score at the school
+  \item $poor$, the percent of students at the school who reported parental incomes of $50K per year or less (counting only those who answered)
+  \item $mom$, the percent of students at the school who reported their mother as having at least a college degree
+  \item $dad$, the percent of students at the school who reported their father as having at least a college degree
+\end{itemize}
+
+For race, PSAT data is more thorough than SAT.  Again the school must have an ai_name and fewer than 2000 PSAT takers in cohort 2011.  Civis aggregates over PSAT takers by school:
+
+\begin{itemize}
+  \item $n$, the count of PSAT takers, saved after the merge as $psat\_n$
+  \item $minority$, the percent of PSAT takers at the school who did not report themselves white or asian (codes 1 and 3)
+\end{itemize}
+
+<<echo=TRUE, results=hide>>=
+# high school ranking
+
+high <- sql("
+            select hs_id, 
+            ai_name,
+            count(*) as n,
+            avg(sat_verbal_max + sat_math_max) as sat,
+            avg(cast(case when st_education_mother in ('Grade School', 'Some High School', 'High school diploma or equivalent', 'Associate or two-year Degree', 'Business or Trade school', 'Some College') then 0
+            when st_education_mother in ('Bachelors or four-year degree', 'Some graduate or professional school', 'Graduate or professional degree') then 1 else NULL end as float)) as mom,
+            avg(cast(case when st_education_father in ('Grade School', 'Some High School', 'High school diploma or equivalent', 'Associate or two-year Degree', 'Business or Trade school', 'Some College') then 0
+            when st_education_father in ('Bachelors or four-year degree', 'Some graduate or professional school', 'Graduate or professional degree') then 1 else null end as float)) as dad,
+            avg(cast(case when st_income_range_sr in ('< $10,000', '$10,000 - $20,000', '$20,000 - $30,000', '$30,000 - $40,000', '$40,000 - $50,000') then 1
+            when st_income_range_sr in ('$50,000 - $60,000', '$60,000 - $70,000', '$70,000 - $80,000', '$80,000 - $100,000', '$100,000 - $120,000', '$120,000 - $140,000', '$140,000 - $160,000', '$160,000 - $180,000', '$180,000 - $200,000', '> $200,000') then 0 else null end as float)) as poor 
+            from cb_analytics.file
+            where round(geo_fips_cd / 1000) in (2,4,6,9,10,11,12,13,15,18,23,24,25,28,32,33,34,36,37,41,42,44,45,48,50,51,53,54)
+            and sat_verbal_max is not null and cohort_yyyy = 2011 and cohort_yyyy is not null
+            group by 1, 2 order by 1, 2
+            ")
+
+
+# get rid of missing high school names and super large high schools
+ok <- !is.na(high$ai_name) & high$n < 2000
+dat <- high[ok,]
+@
+
+The next line sets graph parameters.
+
+<<echo=TRUE, results=hide>>=
+par(mfrow=c(3,2), mar=c(2,2,2,1), mgp=c(1.25,0.1,0), tck=0.005, lwd=0.5, family="Helvetica Neue Light")
+@
+
+% Note: until I figure out how to break up a for-loop in Sweave, the next sections will have to stay together
+
+For each of the variables $sat$, $mom$, $dad$ and $poor$ (and later for $minority$), plot that variable against school size.
+
+Next, a best-fit line (of variable vs number of SAT takers at same high school) is calculated from the non-missing variable values.  The line is plotted along with the variable's mean value.  
+
+This best of fit line will later be used to temper sparse data, so it is worth noting now that Civis' process treats schools with similar numbers of SAT takers similar to each other.  Had they included ACT states in the analysis, this would have been a problematic assumption; large schools in Illinois with low percentage participation are not a priori similar to small schools in Connecticut with high percentage participation.  But ACT states are excluded, so hopefully similarly-sized sets of SAT takers come from similarly-sized schools.  CB could potentially improve on this by merging in our data of actual school size, which is likely a better proxy for school similarity than the size of the SAT-taker pool.
+
+Third, the variable $mu$ is defined as the best-fit predicted value where the variable is observed and the mean of the variable elsewhere. (the second part seems superfluous)  $yhat$, a smoothed and adjusted measure of the variable, is equal to the mean of the variable (not adjusted for number of takers) where the variable is unknown and equal to a weighting of $mu$ and the variable where the variable is known.  In this way, schools with few takers are brought into line with the average of other schools with few takers, but schools with many takers are adjusted very little.  $yhat$ is saved as $sat2$, $mom2$, $dad2$ or $poor2$ and will later replace the variable is smooths.
+
+<<echo=TRUE, results=hide>>=
+par(mfrow=c(3,2), mar=c(2,2,2,1), mgp=c(1.25,0.1,0), tck=0.005, lwd=0.5, family="Helvetica Neue Light")
+for (i_col in c("sat", "mom", "dad", "poor")) {
+  n <- dat$n
+  y <- dat[,i_col]
+  plot(n,y,xlab="",ylab="",pch=20, main=i_col)
+    
+  ok <- !is.na(y)
+  L <- loess(y ~ n, subset=ok, span=0.5)
+  points(n[ok], L$fit, pch=20, col="red")
+  abline(h=mean(y, na.rm=T), col="blue", lwd=2)
+  
+  mu <- rep(NA, nrow(dat))
+  mu[ok] <- L$fit
+  mu[!ok] <- mean(y, na.rm=T)
+  
+  yhat <- rep(NA, nrow(dat))
+  yhat <- (y * n + mu * 50) / (n + 50)
+  yhat[is.na(yhat)] <- mean(y, na.rm=T)
+  eval(parse(text=paste0("dat[,'", i_col, "2'] <- yhat")))
+}
+@
+
+Graphs of the now smoothed variable are displayed.  There is a bit of non-functional code reuse.
+
+<<echo=TRUE, results=hide>>=
+par(mfrow=c(3,2), mar=c(2,2,2,1), mgp=c(1.25,0.1,0), tck=0.005, lwd=0.5, family="Helvetica Neue Light")
+for (i_col in c("sat", "mom", "dad", "poor")) {
+  n <- dat$n
+  y <- dat[,paste0(i_col, "2")]
+  plot(n,y,xlab="",ylab="",pch=20, main=i_col)
+  
+  ok <- !is.na(y)
+  L <- loess(y ~ n, subset=ok, span=0.5)
+  points(n[ok], L$fit, pch=20, col="red")
+  abline(h=mean(y, na.rm=T), col="blue", lwd=2)
+}
+@
+
+The smoothed versions of each rollup variable are merged into the base data, and replaced with the original versions if the smoothed versions are undefined.  This surprises me, as it does look like the code guarantees that the smoothed versions would be defined in all cases.
+
+<<echo=TRUE, results=hide>>=
+high <- merge(x=high, y=dat[, c("hs_id", "sat2", "mom2", "dad2", "poor2")], all.x=T, all.y=F)
+for (i_col in c("sat", "mom", "dad", "poor")) {
+  ok <- is.na(high[,paste0(i_col, "2")])
+  eval(parse(text=paste0("high[ok,'", i_col, "2'] <- high[ok,'", i_col, "']")))
+}
+@
+
+The average of each rollup variable, weighted by number of takers at each school, replaces any remaining missing values.  Again, my impression is that no such missing values should exist; $yhat$ is defined in all cases where the mean of $y$ is defined.
+
+<<echo=TRUE, results=hide>>=
+# one last mean value replacement for the 5 or so missing cases
+for (i_col in c("sat2", "mom2", "dad2", "poor2")) {
+  ok <- is.na(high[,i_col])
+  mu <- sum(high$n[!ok] * high[!ok,i_col]) / sum(high$n[!ok])
+  high[ok,i_col] <- mu
+}
+@
+
+The entire process (except the last replacement block described directly above) is repeated for the variable $minority$ based on PSAT data.
+
+<<echo=TRUE, results=hide>>=
+psat <- sql("
+            select hs_id, 
+            ai_name,
+            count(*) as n,
+            avg(cast(case when st_race in ('white', 'asian') then 0
+            when st_race in ('black', 'hispanic', 'native', 'other') then 1 else null end as float)) as minority,
+            sum(case when sat_verbal_max is not null then 1 else 0 end) as sat_takers
+            from cb_analytics.file
+            where round(geo_fips_cd / 1000) in (2,4,6,9,10,11,12,13,15,18,23,24,25,28,32,33,34,36,37,41,42,44,45,48,50,51,53,54)
+            and psat_score_reading_max is not null and cohort_yyyy = 2011 and cohort_yyyy is not null
+            group by 1, 2 order by 1, 2
+            ")
+
+
+# get rid of missing high school names and super large high schools
+ok <- !is.na(psat$ai_name) & psat$n < 2000
+dat <- psat[ok,]
+
+par(mfrow=c(3,2), mar=c(2,2,2,1), mgp=c(1.25,0.1,0), tck=0.005, lwd=0.5, family="Helvetica Neue Light")
+for (i_col in c("minority")) {
+  n <- dat$n
+  y <- dat[,i_col]
+  plot(n,y,xlab="",ylab="",pch=20, main=i_col)
+  
+  ok <- !is.na(y)
+  L <- loess(y ~ n, subset=ok, span=0.5)
+  points(n[ok], L$fit, pch=20, col="red")
+  abline(h=mean(y, na.rm=T), col="blue", lwd=2)
+  
+  mu <- rep(NA, nrow(dat))
+  mu[ok] <- L$fit
+  mu[!ok] <- mean(y, na.rm=T)
+  
+  yhat <- rep(NA, nrow(dat))
+  yhat <- (y * n + mu * 50) / (n + 50)
+  yhat[is.na(yhat)] <- mean(y, na.rm=T)
+  eval(parse(text=paste0("dat[,'", i_col, "2'] <- yhat")))
+}
+
+par(mfrow=c(3,2), mar=c(2,2,2,1), mgp=c(1.25,0.1,0), tck=0.005, lwd=0.5, family="Helvetica Neue Light")
+for (i_col in c("minority")) {
+  n <- dat$n
+  y <- dat[,paste0(i_col, "2")]
+  plot(n,y,xlab="",ylab="",pch=20, main=i_col)
+  
+  ok <- !is.na(y)
+  L <- loess(y ~ n, subset=ok, span=0.5)
+  points(n[ok], L$fit, pch=20, col="red")
+  abline(h=mean(y, na.rm=T), col="blue", lwd=2)
+}
+
+psat <- merge(x=psat, y=dat[, c("hs_id", "minority2")], all.x=T, all.y=F)
+for (i_col in c("minority")) {
+  ok <- is.na(psat[,paste0(i_col, "2")])
+  eval(parse(text=paste0("psat[ok,'", i_col, "2'] <- psat[ok,'", i_col, "']")))
+}
+@
+
+SAT-derived and PSAT-derived data are merged and subsetted to the rollup variables and counts of takers.
+
+<<echo=TRUE, results=hide>>=
+colnames(high)[colnames(high)=="n"] <- "sat_n"
+colnames(psat)[colnames(psat)=="n"] <- "psat_n"
+dat <- merge(x=high, y=psat, by="hs_id", all.x=T, all.y=T)
+dat <- dat[,c("hs_id", "sat_n", "psat_n", "sat2", "mom2", "dad2", "poor2", "minority2")]
+@
+
+Parental education rollup variable, $edu$, will be each school's average of percent of mothers will college degrees and percent of fathers with college degrees.
+
+<<echo=TRUE, results=hide>>=
+dat$edu <- apply(dat[, c("mom2", "dad2")], 1, mean, na.rm=T)
+@
+
+We then drop the "2" label that indicates variable smoothing.
+
+<<echo=TRUE, results=hide>>=
+colnames(dat) <- gsub("2", "", colnames(dat))
+@
+
+Schools with no SDQ responses are given weighted-average values of $edu$, $poor$ and $sat$.  Schools with no PSAT are given weighted-average values of $minority$.
+
+<<echo=TRUE, results=hide>>=
+dat$sat_n[is.na(dat$sat_n)] <- 0
+dat$psat_n[is.na(dat$psat_n)] <- 0
+for (i in c("sat", "edu", "poor")) {
+  ok <- is.na(dat[,i])
+  dat[ok,i] <- sum(dat$sat_n[!ok] * dat[!ok,i]) / sum(dat$sat_n[!ok])
+}
+for (i in c("minority")) {
+  ok <- is.na(dat[,i])
+  dat[ok,i] <- sum(dat$psat_n[!ok] * dat[!ok,i]) / sum(dat$psat_n[!ok])
+}
+@
+
+$mom$ and $dad$ are removed from the rollup variables and the remaining values are written to a text file.
+
+<<echo=TRUE, results=hide>>=
+dat <- dat[,!(colnames(dat) %in% c("mom","dad"))]
+
+write.table(dat, "hs_rollups_20130618.txt", row.names=F, quote=F, sep="\t")
+@
+
+\end{document}
